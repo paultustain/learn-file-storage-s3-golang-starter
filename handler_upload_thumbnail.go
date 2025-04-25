@@ -8,7 +8,17 @@ import (
 	"github.com/google/uuid"
 )
 
+
+const maxMemory := 10 << 20
+
+
+
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(maxMemory)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Unable to parse multi file", err)
+		return 
+	}
 	videoIDString := r.PathValue("videoID")
 	videoID, err := uuid.Parse(videoIDString)
 	if err != nil {

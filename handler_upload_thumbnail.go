@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"mime"
+	"crypto"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"

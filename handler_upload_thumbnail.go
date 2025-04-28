@@ -7,14 +7,11 @@ import (
 	"time"
 	"path/filepath"
 	"os"
-	"strings"
 	"mime"
-	"crypto"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
 )
-
 
 const maxMemory = 10 << 20
 
@@ -47,14 +44,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Unable to parse multifile", err)
 		return 
 	}
+
 	file, fileheader, err := r.FormFile("thumbnail") 
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Unable to get thumbnail", err)
 		return 
 	}
 	
-	contentType := fileheader.Header["Content-Type"]
-	mediaType, _, err := mime.ParseMediaType(contentType[0])
+	mediaType, _, err := mime.ParseMediaType(fileheader.Header.Get("Content-Type"))
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Failed to parse media type", err)
 		return 
@@ -66,13 +63,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return 
 	}
 	
-	dbVideo, err := cfg.db.GetVideo(videoID) 
-	if dbVideo.UserID != userID {
-		respondWithError(w, http.StatusUnauthorized, "Failed to get video from db", err)
-		return 
-	}
-	
-	fileID := fmt.Sprintf("%s.%s", videoID, strings.Split(contentType[0], "/")[1])
+	fileID := getAssetPath(videoID, mediaType)
 	thumbnailPath := filepath.Join(cfg.assetsRoot, fileID)
 
 	assetFile , err := os.Create(thumbnailPath)
@@ -87,8 +78,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return 
 	}
 
+	dbVideo, err := cfg.db.GetVideo(videoID) 
+	if dbVideo.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Failed to get video from db", err)
+		return 
+	}
 	
-	dataURL := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, fileID)
+	
+	dataURL := cfg.getAssetURL(thumbnailPath)
 	updatedVideo := dbVideo 
 	updatedVideo.UpdatedAt = time.Now()
 	updatedVideo.ThumbnailURL = &dataURL 

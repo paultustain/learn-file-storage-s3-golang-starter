@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/config"
+
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 
 	"github.com/joho/godotenv"
@@ -21,12 +24,15 @@ type apiConfig struct {
 	s3Region         string
 	s3CfDistribution string
 	port             string
+	s3Client	 *s3.Client
 }
 
 
 func main() {
 	godotenv.Load(".env")
-
+	
+	sdkCfg, err := config.LoadDefaultConfix(context.Context, config.WithRegion(s3Region))
+	
 	pathToDB := os.Getenv("DB_PATH")
 	if pathToDB == "" {
 		log.Fatal("DB_URL must be set")

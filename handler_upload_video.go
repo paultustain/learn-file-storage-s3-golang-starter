@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -87,10 +88,44 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	ratio, err := getVideoAspectRatio(tempFile.Name())
+	var orientation string
+
+	switch ratio {
+	case "16:9":
+		orientation = "landscape"
+	case "9:16":
+		orientation = "portrait"
+	default:
+		orientation = "other"
+	}
+
+	newURL := fmt.Sprintf(
+		"https://%s.s3.%s.amazonaws.com/%s/%s.mp4",
+		cfg.s3Bucket,
+		cfg.s3Region,
+		orientation,
+		videoID.String(),
+	)
+
+	processedFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "failed to process url", err)
+		return
+	}
+
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "failed to open processed video", err)
+		return
+	}
+	defer processedFile.Close()
+	defer os.Remove(processedFilePath)
+
 	_, err = cfg.s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
-		Key:         aws.String(fmt.Sprintf("%s.mp4", videoID.String())),
-		Body:        tempFile,
+		Key:         aws.String(fmt.Sprintf("%s/%s.mp4", orientation, videoID.String())),
+		Body:        processedFile,
 		ContentType: aws.String("video/mp4"),
 	})
 
@@ -98,13 +133,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusBadRequest, "failed to put object", err)
 		return
 	}
-
-	newURL := fmt.Sprintf(
-		"https://%s.s3.%s.amazonaws.com/%s.mp4",
-		cfg.s3Bucket,
-		cfg.s3Region,
-		videoID.String(),
-	)
 
 	updatedVideo := dbVideo
 	updatedVideo.VideoURL = &newURL
@@ -117,5 +145,17 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	respondWithJSON(w, http.StatusOK, updatedVideo)
+}
+
+func processVideoForFastStart(filepath string) (string, error) {
+	outputPath := filepath + ".processing"
+
+	cmd := exec.Command("ffmpeg", "-i", filepath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", outputPath)
+
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return outputPath, nil
 
 }

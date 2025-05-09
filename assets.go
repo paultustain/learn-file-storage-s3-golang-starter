@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,21 +47,22 @@ func mediaTypeToExt(mediaType string) string {
 func getVideoAspectRatio(filepath string) (string, error) {
 
 	type Aspect struct {
-		Height int `json:"height"`
-		Width  int `json:"width"`
+		Streams []struct {
+			AspectRatio string `json:"display_aspect_ratio"`
+		} `json:"streams"`
 	}
 
-	out, err := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filepath).Output()
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filepath)
+
+	var outPtr bytes.Buffer
+	cmd.Stdout = &outPtr
+
+	cmd.Run()
+
+	aspect := Aspect{}
+	err := json.Unmarshal(outPtr.Bytes(), &aspect)
 	if err != nil {
 		return "", err
 	}
-
-	//cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filepath)
-	//var outPtr  bytes.Buffer
-	//cmd.Stdout = &outPtr
-
-	//if outPtr, err = cmd.Run(); err != nil {
-	//	return "", err
-	//}
-
+	return aspect.Streams[0].AspectRatio, nil
 }

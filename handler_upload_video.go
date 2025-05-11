@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"time"
+	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -76,8 +76,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
-	_, err = io.Copy(tempFile, file)
-	if err != nil {
+	if _, err = io.Copy(tempFile, file); err != nil {
 		respondWithError(w, http.StatusBadRequest, "failed to copy files", err)
 		return
 	}
@@ -89,6 +88,10 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	ratio, err := getVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error finding aspect ratio", err)
+		return
+	}
 	var orientation string
 
 	switch ratio {
@@ -100,19 +103,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		orientation = "other"
 	}
 
-	newURL := fmt.Sprintf(
-		"https://%s.s3.%s.amazonaws.com/%s/%s.mp4",
-		cfg.s3Bucket,
-		cfg.s3Region,
-		orientation,
-		videoID.String(),
-	)
+	key := getAssetPath(mediaType)
+	key = filepath.Join(orientation, key)
 
 	processedFilePath, err := processVideoForFastStart(tempFile.Name())
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "failed to process url", err)
 		return
 	}
+	defer os.Remove(processedFilePath)
 
 	processedFile, err := os.Open(processedFilePath)
 	if err != nil {
@@ -120,13 +119,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer processedFile.Close()
-	defer os.Remove(processedFilePath)
 
 	_, err = cfg.s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
-		Key:         aws.String(fmt.Sprintf("%s/%s.mp4", orientation, videoID.String())),
+		Key:         aws.String(key),
 		Body:        processedFile,
-		ContentType: aws.String("video/mp4"),
+		ContentType: aws.String(mediaType),
 	})
 
 	if err != nil {
@@ -134,17 +132,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	updatedVideo := dbVideo
-	updatedVideo.VideoURL = &newURL
-	updatedVideo.UpdatedAt = time.Now()
-	err = cfg.db.UpdateVideo(updatedVideo)
-
+	url := fmt.Sprintf("https://%s/%s", cfg.s3CfDistribution, key)
+	dbVideo.VideoURL = &url
+	err = cfg.db.UpdateVideo(dbVideo)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "failed to update video", err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, updatedVideo)
+	respondWithJSON(w, http.StatusOK, dbVideo)
 }
 
 func processVideoForFastStart(filepath string) (string, error) {
@@ -157,5 +153,4 @@ func processVideoForFastStart(filepath string) (string, error) {
 		return "", err
 	}
 	return outputPath, nil
-
 }
